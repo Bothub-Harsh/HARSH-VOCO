@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign Up | Harsh Vocabulary Intelligence System</title>
+  <style>
+    body {font-family: Inter, Arial, sans-serif; margin:0; background:#0b1020; color:#e6ebff; display:grid; place-items:center; min-height:100vh;}
+    .card {width:min(420px, 92vw); background:#151c33; padding:2rem; border-radius:16px; box-shadow:0 16px 40px rgba(0,0,0,.35);}
+    input, button {width:100%; border-radius:10px; border:1px solid #2a355f; padding:.75rem; margin:.5rem 0; background:#0f1530; color:#fff;}
+    button {background:linear-gradient(120deg,#6b7cff,#4dffc8); color:#0b1020; font-weight:700; cursor:pointer;}
+    .msg {min-height:1.2rem; color:#ffb2b2;}
+    a {color:#8eb3ff;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Create Account</h1>
+    <input id="username" placeholder="Username" />
+    <input id="password" type="password" placeholder="Password (min 6 chars)" />
+    <button id="signupBtn">Sign Up</button>
+    <div class="msg" id="msg"></div>
+    <p>Already have an account? <a href="/">Login</a></p>
+  </div>
+  <script>
+    const BASE_URL = '';
+
+    document.getElementById('signupBtn').addEventListener('click', async () => {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const res = await fetch(`${BASE_URL}/api/auth/signup`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      const data = await res.json();
+      if(!res.ok){ document.getElementById('msg').textContent = data.detail || 'Signup failed'; return; }
+      window.location.href=`${BASE_URL}/`;
+    });
+  </script>
+</body>
+</html>
