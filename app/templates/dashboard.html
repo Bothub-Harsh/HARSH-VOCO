@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard | Harsh Vocabulary Intelligence System</title>
+  <style>
+    :root { --bg:#0b1020; --panel:#151c33; --card:#1c2545; --accent:#7b8dff; --text:#e6ebff; --muted:#9aa6d1; }
+    body { margin:0; font-family: Inter, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .container { max-width:1200px; margin:0 auto; padding:1rem; display:grid; gap:1rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; }
+    .panel { background:var(--panel); border:1px solid #263157; border-radius:14px; padding:1rem; }
+    .word-card {background:linear-gradient(145deg,#202b4f,#151c33); padding:1rem; border-radius:14px;}
+    button, select, input { border:1px solid #2a355f; background:#101835; color:var(--text); border-radius:10px; padding:.6rem; }
+    button {cursor:pointer; background:linear-gradient(120deg,#6b7cff,#4dffc8); color:#08122f; font-weight:700;}
+    details {margin:.5rem 0; background:var(--card); border-radius:10px; padding:.5rem;}
+    .word-item{ display:flex; justify-content:space-between; align-items:center; gap:.5rem; border-bottom:1px solid #2b3864; padding:.5rem 0; }
+    .stats {display:grid; grid-template-columns:repeat(2,minmax(100px,1fr)); gap:.6rem;}
+    .stat {background:var(--card); border-radius:10px; padding:.7rem;}
+    .muted {color:var(--muted);} .topbar{display:flex;justify-content:space-between;align-items:center;}
+    @media(max-width:700px){ .stats{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="panel topbar">
+      <div>
+        <h2 style="margin:.2rem 0;">Harsh Vocabulary Intelligence System</h2>
+        <div class="muted" id="profile"></div>
+      </div>
+      <button id="logoutBtn">Logout</button>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h3>Add Word</h3>
+        <input id="wordInput" placeholder="Word" />
+        <input id="meaningInput" placeholder="Meaning" />
+        <select id="groupInput"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+        <button id="addWordBtn">Add</button>
+      </section>
+
+      <section class="panel">
+        <h3>Learning Control Panel</h3>
+        <select id="modeSelect">
+          <option value="single_group">Single Group Mode</option>
+          <option value="all_rotation">All Group Rotation Mode</option>
+          <option value="smart_spaced" selected>Smart Spaced Repetition</option>
+        </select>
+        <select id="modeGroup">
+          <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+        </select>
+        <button id="saveModeBtn">Save Mode</button>
+        <button id="nextWordBtn">Get Next Word</button>
+      </section>
+
+      <section class="panel">
+        <h3>Live Learning Card</h3>
+        <div class="word-card">
+          <h2 id="liveWord">No word yet</h2>
+          <p id="liveMeaning" class="muted">Waiting for scheduler/WebSocket updates.</p>
+          <p class="muted">Group: <span id="liveGroup">-</span> • Strength: <span id="liveStrength">0</span> • Next push in <span id="countdown">-</span>s</p>
+          <div style="display:flex; gap:.6rem;"><button id="correctBtn">Correct</button><button id="wrongBtn">Incorrect</button></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Performance Dashboard</h3>
+        <div class="stats" id="stats"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h3>Grouped Word Lists</h3>
+      <div id="groupedWords"></div>
+    </section>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = '/';
+
+    let currentWordId = null;
+    let ws = null;
+    let pingTimer = null;
+
+    const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type':'application/json' };
+
+    async function api(path, options={}) {
+      const res = await fetch(path, { ...options, headers: { ...authHeaders, ...(options.headers||{}) } });
+      if (res.status === 401) { localStorage.clear(); window.location.href='/'; }
+      return { ok: res.ok, data: await res.json() };
+    }
+
+    async function loadProfile(){
+      const {data} = await api('/api/auth/me');
+      document.getElementById('profile').textContent = `Logged in as ${data.username}`;
+    }
+
+    async function loadWords(){
+      const {data} = await api('/api/words');
+      const root = document.getElementById('groupedWords'); root.innerHTML='';
+      Object.entries(data).forEach(([group, words]) => {
+        const details = document.createElement('details'); details.open = true;
+        details.innerHTML = `<summary>Group ${group} (${words.length})</summary>`;
+        words.forEach(w => {
+          const row = document.createElement('div'); row.className='word-item';
+          row.innerHTML = `<div><strong>${w.word}</strong> - <span class='muted'>${w.meaning}</span></div>`;
+          const del = document.createElement('button'); del.textContent='Delete'; del.onclick=()=>deleteWord(w.id);
+          row.appendChild(del); details.appendChild(row);
+        });
+        root.appendChild(details);
+      });
+    }
+
+    async function loadStats(){
+      const {data} = await api('/api/stats');
+      document.getElementById('stats').innerHTML = `
+        <div class='stat'><div class='muted'>Total Words</div><strong>${data.total_words}</strong></div>
+        <div class='stat'><div class='muted'>Strong Words</div><strong>${data.strong_words}</strong></div>
+        <div class='stat'><div class='muted'>Weak Words</div><strong>${data.weak_words}</strong></div>
+        <div class='stat'><div class='muted'>Accuracy %</div><strong>${data.accuracy_percentage}</strong></div>
+        <div class='stat'><div class='muted'>Learning Streak</div><strong>${data.learning_streak_days} days</strong></div>`;
+    }
+
+    function renderWord(word, countdown = '-') {
+      currentWordId = word.id;
+      liveWord.textContent = word.word;
+      liveMeaning.textContent = word.meaning;
+      liveGroup.textContent = word.group_name;
+      liveStrength.textContent = word.strength_score;
+      document.getElementById('countdown').textContent = countdown;
+    }
+
+    async function connectWS(){
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'default') await Notification.requestPermission();
+      ws = new WebSocket(`ws://${location.host}/ws/learning?token=${token}`);
+      ws.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'next_word') {
+          renderWord(payload.word, payload.countdown_seconds);
+          if (Notification.permission === 'granted') {
+            new Notification('Vocabulary Review Time', { body: `${payload.word.word}: ${payload.word.meaning}` });
+          }
+        }
+      };
+      ws.onopen = () => {
+        pingTimer = setInterval(() => ws.send('ping'), 8000);
+      };
+      ws.onclose = () => { if (pingTimer) clearInterval(pingTimer); setTimeout(connectWS, 3000); };
+    }
+
+    async function addWord(){
+      await api('/api/words', { method:'POST', body:JSON.stringify({ word:wordInput.value, meaning:meaningInput.value, group_name:groupInput.value })});
+      wordInput.value=''; meaningInput.value='';
+      await Promise.all([loadWords(), loadStats()]);
+    }
+    async function deleteWord(id){ await api(`/api/words/${id}`, {method:'DELETE'}); await Promise.all([loadWords(), loadStats()]); }
+
+    async function saveMode(){
+      await api('/api/learning/mode', {method:'POST', body:JSON.stringify({ mode:modeSelect.value, selected_group:modeGroup.value })});
+    }
+
+    async function fetchNextWord(){
+      const params = new URLSearchParams({mode:modeSelect.value, selected_group:modeGroup.value});
+      const {ok, data} = await api('/api/learning/next?' + params.toString());
+      if (ok) renderWord(data);
+    }
+
+    async function review(was_correct){
+      if (!currentWordId) return;
+      await api('/api/learning/review', {method:'POST', body:JSON.stringify({ word_id: currentWordId, was_correct })});
+      await loadStats();
+      await fetchNextWord();
+    }
+
+    addWordBtn.onclick = addWord;
+    saveModeBtn.onclick = saveMode;
+    nextWordBtn.onclick = fetchNextWord;
+    correctBtn.onclick = () => review(true);
+    wrongBtn.onclick = () => review(false);
+    logoutBtn.onclick = async () => { await api('/api/auth/logout', {method:'POST'}); localStorage.clear(); window.location.href='/'; };
+
+    loadProfile(); loadWords(); loadStats(); connectWS();
+  </script>
+</body>
+</html>
