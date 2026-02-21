@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections import defaultdict
 
-from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.auth import get_current_user
-from app.database import Base, engine
+from app.database import get_sqlite_db_file_path, initialize_database
 from app.routes.auth_routes import router as auth_router
 from app.routes.learning_routes import router as learning_router
 from app.routes.stats_routes import router as stats_router
 from app.routes.word_routes import router as word_router
 from app.scheduler import LearningScheduler
 
-Base.metadata.create_all(bind=engine)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Harsh Vocabulary Intelligence System", version="1.0.0")
 templates = Jinja2Templates(directory="app/templates")
@@ -57,6 +58,12 @@ app.state.learning_scheduler = LearningScheduler(websocket_manager)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    initialize_database()
+    sqlite_path = get_sqlite_db_file_path()
+    if sqlite_path is not None:
+        exists = sqlite_path.exists()
+        logger.info("SQLite database path: %s", sqlite_path)
+        logger.info("SQLite database file present: %s", exists)
     app.state.learning_scheduler.start()
 
 
