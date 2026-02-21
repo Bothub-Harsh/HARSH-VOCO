@@ -45,14 +45,20 @@
         });
 
         let data = {};
+        let rawError = '';
         try {
           data = await res.json();
         } catch (_) {
+          try {
+            rawError = await res.text();
+          } catch (_) {
+            rawError = '';
+          }
           data = {};
         }
 
         if (!res.ok) {
-          msg.textContent = data.detail || 'Login failed';
+          msg.textContent = data.detail || rawError || `Login failed (HTTP ${res.status})`;
           return;
         }
 

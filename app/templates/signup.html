@@ -43,14 +43,20 @@
         });
 
         let data = {};
+        let rawError = '';
         try {
           data = await res.json();
         } catch (_) {
+          try {
+            rawError = await res.text();
+          } catch (_) {
+            rawError = '';
+          }
           data = {};
         }
 
         if (!res.ok) {
-          msg.textContent = data.detail || 'Signup failed';
+          msg.textContent = data.detail || rawError || `Signup failed (HTTP ${res.status})`;
           return;
         }
 
