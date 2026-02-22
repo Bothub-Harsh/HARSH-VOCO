@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import User, Word
 from app.services.learning_engine import (
     MODE_SMART_SPACED,
+    MODE_SINGLE_GROUP,
     VALID_GROUPS,
     VALID_MODES,
     apply_review_result,
@@ -61,6 +62,31 @@ def next_word(
         "group_name": word.group_name,
         "strength_score": word.strength_score,
     }
+
+
+@router.post("/start-learning")
+def start_learning(
+    payload: LearningPreference,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    mode = payload.mode.strip().lower()
+    if mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail="Invalid learning mode")
+
+    selected_group = payload.selected_group
+    if mode == MODE_SINGLE_GROUP and selected_group not in VALID_GROUPS:
+        raise HTTPException(status_code=400, detail="Single group mode requires group A/B/C/D")
+
+    scheduler = request.app.state.learning_scheduler
+    scheduler.start_learning_for_user(user.id, mode, selected_group)
+    return {"message": "Learning started", "mode": mode, "selected_group": selected_group}
+
+
+@router.post("/stop-learning")
+def stop_learning(request: Request, user: User = Depends(get_current_user)):
+    request.app.state.learning_scheduler.stop_learning_for_user(user.id)
+    return {"message": "Learning stopped"}
 
 
 @router.post("/review")

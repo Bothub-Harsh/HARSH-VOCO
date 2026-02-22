@@ -51,6 +51,8 @@
           <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
         </select>
         <button id="saveModeBtn">Save Mode</button>
+        <button id="startLearningBtn">Start Learning</button>
+        <button id="stopLearningBtn">Stop Learning</button>
         <button id="nextWordBtn">Get Next Word</button>
       </section>
 
@@ -84,6 +86,7 @@
     let currentWordId = null;
     let ws = null;
     let pingTimer = null;
+    let countdownTimer = null;
 
     const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type':'application/json' };
 
@@ -124,18 +127,31 @@
         <div class='stat'><div class='muted'>Learning Streak</div><strong>${data.learning_streak_days} days</strong></div>`;
     }
 
+    function startCountdown(seconds) {
+      if (countdownTimer) clearInterval(countdownTimer);
+      let remaining = Number(seconds);
+      const countdownEl = document.getElementById('countdown');
+      if (!Number.isFinite(remaining)) {
+        countdownEl.textContent = '-';
+        return;
+      }
+      countdownEl.textContent = String(remaining);
+      countdownTimer = setInterval(() => {
+        remaining = Math.max(0, remaining - 1);
+        countdownEl.textContent = String(remaining);
+      }, 1000);
+    }
+
     function renderWord(word, countdown = '-') {
       currentWordId = word.id;
       liveWord.textContent = word.word;
       liveMeaning.textContent = word.meaning;
       liveGroup.textContent = word.group_name;
       liveStrength.textContent = word.strength_score;
-      document.getElementById('countdown').textContent = countdown;
+      startCountdown(countdown);
     }
 
     async function connectWS(){
-      if (!('Notification' in window)) return;
-      if (Notification.permission === 'default') await Notification.requestPermission();
       const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${wsProtocol}://${location.host}${BASE_URL}/ws/learning?token=${token}`);
       ws.onmessage = (event) => {
@@ -143,7 +159,9 @@
         if (payload.type === 'next_word') {
           renderWord(payload.word, payload.countdown_seconds);
           if (Notification.permission === 'granted') {
-            new Notification('Vocabulary Review Time', { body: `${payload.word.word}: ${payload.word.meaning}` });
+            const word = payload.word.word;
+            const meaning = payload.word.meaning;
+            new Notification('New Word', { body: word + ' - ' + meaning });
           }
         }
       };
@@ -151,6 +169,13 @@
         pingTimer = setInterval(() => ws.send('ping'), 8000);
       };
       ws.onclose = () => { if (pingTimer) clearInterval(pingTimer); setTimeout(connectWS, 3000); };
+    }
+
+    async function requestNotificationPermission() {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+      }
     }
 
     async function addWord(){
@@ -162,6 +187,16 @@
 
     async function saveMode(){
       await api('/api/learning/mode', {method:'POST', body:JSON.stringify({ mode:modeSelect.value, selected_group:modeGroup.value })});
+    }
+
+    async function startLearning(){
+      await api('/start-learning', { method:'POST', body:JSON.stringify({ mode: modeSelect.value, group: modeGroup.value }) });
+    }
+
+    async function stopLearning(){
+      await api('/stop-learning', { method:'POST', body:JSON.stringify({}) });
+      if (countdownTimer) clearInterval(countdownTimer);
+      document.getElementById('countdown').textContent = '-';
     }
 
     async function fetchNextWord(){
@@ -179,12 +214,14 @@
 
     addWordBtn.onclick = addWord;
     saveModeBtn.onclick = saveMode;
+    startLearningBtn.onclick = startLearning;
+    stopLearningBtn.onclick = stopLearning;
     nextWordBtn.onclick = fetchNextWord;
     correctBtn.onclick = () => review(true);
     wrongBtn.onclick = () => review(false);
     logoutBtn.onclick = async () => { await api('/api/auth/logout', {method:'POST'}); localStorage.clear(); window.location.href=`${BASE_URL}/`; };
 
-    loadProfile(); loadWords(); loadStats(); connectWS();
+    loadProfile(); loadWords(); loadStats(); requestNotificationPermission(); connectWS();
   </script>
 </body>
 </html>
