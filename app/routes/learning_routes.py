@@ -16,6 +16,7 @@ from app.services.learning_engine import (
 )
 
 router = APIRouter(prefix="/api/learning", tags=["learning"])
+public_router = APIRouter(tags=["learning"])
 
 
 class LearningPreference(BaseModel):
@@ -28,20 +29,29 @@ class ReviewPayload(BaseModel):
     was_correct: bool
 
 
+class StartLearningPayload(BaseModel):
+    mode: str = Field(default=MODE_SMART_SPACED)
+    selected_group: str | None = None
+
+
+def _validated_mode(payload: StartLearningPayload) -> tuple[str, str | None]:
+    mode = payload.mode.strip().lower()
+    if mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail="Invalid learning mode")
+    if mode == "single_group" and payload.selected_group not in VALID_GROUPS:
+        raise HTTPException(status_code=400, detail="Single group mode requires group A/B/C/D")
+    return mode, payload.selected_group
+
+
 @router.post("/mode")
 def update_mode(
     payload: LearningPreference,
     request: Request,
     user: User = Depends(get_current_user),
 ):
-    mode = payload.mode.strip().lower()
-    if mode not in VALID_MODES:
-        raise HTTPException(status_code=400, detail="Invalid learning mode")
-    if mode == "single_group" and payload.selected_group not in VALID_GROUPS:
-        raise HTTPException(status_code=400, detail="Single group mode requires group A/B/C/D")
-
-    request.app.state.learning_scheduler.update_user_preference(user.id, mode, payload.selected_group)
-    return {"message": "Learning mode updated", "mode": mode, "selected_group": payload.selected_group}
+    mode, selected_group = _validated_mode(StartLearningPayload(**payload.model_dump()))
+    request.app.state.learning_scheduler.update_user_preference(user.id, mode, selected_group)
+    return {"message": "Learning mode updated", "mode": mode, "selected_group": selected_group}
 
 
 @router.get("/next")
@@ -75,3 +85,22 @@ def submit_review(payload: ReviewPayload, db: Session = Depends(get_db), user: U
         "strength_score": updated.strength_score,
         "next_review": updated.next_review.isoformat() if updated.next_review else None,
     }
+
+
+@router.post("/start-learning")
+@public_router.post("/start-learning")
+def start_learning(
+    payload: StartLearningPayload,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    mode, selected_group = _validated_mode(payload)
+    request.app.state.learning_scheduler.start_learning(user.id, mode, selected_group)
+    return {"message": "Learning started", "mode": mode, "selected_group": selected_group}
+
+
+@router.post("/stop-learning")
+@public_router.post("/stop-learning")
+def stop_learning(request: Request, user: User = Depends(get_current_user)):
+    request.app.state.learning_scheduler.stop_learning(user.id)
+    return {"message": "Learning stopped"}
