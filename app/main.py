@@ -5,18 +5,21 @@ import logging
 import os
 from collections import defaultdict
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from app.auth import get_current_user
 from app.database import get_sqlite_db_file_path, initialize_database
+from app.models import User
 from app.routes.auth_routes import router as auth_router
 from app.routes.learning_routes import router as learning_router
 from app.routes.stats_routes import router as stats_router
 from app.routes.word_routes import router as word_router
 from app.scheduler import LearningScheduler
+from app.services.learning_engine import MODE_SINGLE_GROUP, VALID_GROUPS, VALID_MODES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -96,6 +99,26 @@ def dashboard_page(request: Request):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.post("/start-learning")
+def start_learning_endpoint(request: Request, payload: dict, user: User = Depends(get_current_user)):
+    mode = str(payload.get("mode", "smart_spaced")).strip().lower()
+    selected_group = payload.get("group")
+
+    if mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail="Invalid learning mode")
+    if mode == MODE_SINGLE_GROUP and selected_group not in VALID_GROUPS:
+        raise HTTPException(status_code=400, detail="Single group mode requires group A/B/C/D")
+
+    request.app.state.learning_scheduler.start_learning_for_user(user.id, mode, selected_group)
+    return {"message": "Learning started", "mode": mode, "group": selected_group}
+
+
+@app.post("/stop-learning")
+def stop_learning_endpoint(request: Request, user: User = Depends(get_current_user)):
+    request.app.state.learning_scheduler.stop_learning_for_user(user.id)
+    return {"message": "Learning stopped"}
 
 
 @app.websocket("/ws/learning")
