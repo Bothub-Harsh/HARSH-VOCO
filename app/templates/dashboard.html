@@ -82,43 +82,89 @@
     const token = localStorage.getItem('token');
     if (!token) window.location.href = '/';
 
+    const elements = {
+      profile: document.getElementById('profile'),
+      groupedWords: document.getElementById('groupedWords'),
+      stats: document.getElementById('stats'),
+      liveWord: document.getElementById('liveWord'),
+      liveMeaning: document.getElementById('liveMeaning'),
+      liveGroup: document.getElementById('liveGroup'),
+      liveStrength: document.getElementById('liveStrength'),
+      countdown: document.getElementById('countdown'),
+      wordInput: document.getElementById('wordInput'),
+      meaningInput: document.getElementById('meaningInput'),
+      groupInput: document.getElementById('groupInput'),
+      modeSelect: document.getElementById('modeSelect'),
+      modeGroup: document.getElementById('modeGroup'),
+      addWordBtn: document.getElementById('addWordBtn'),
+      saveModeBtn: document.getElementById('saveModeBtn'),
+      startLearningBtn: document.getElementById('startLearningBtn'),
+      stopLearningBtn: document.getElementById('stopLearningBtn'),
+      nextWordBtn: document.getElementById('nextWordBtn'),
+      correctBtn: document.getElementById('correctBtn'),
+      wrongBtn: document.getElementById('wrongBtn'),
+      logoutBtn: document.getElementById('logoutBtn')
+    };
+
+    const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
     let currentWordId = null;
     let ws = null;
     let pingTimer = null;
     let countdownTimer = null;
 
-    const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type':'application/json' };
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { ...authHeaders, ...(options.headers || {}) }
+      });
+      if (response.status === 401) {
+        localStorage.clear();
+        window.location.href = '/';
+      }
 
-    async function api(path, options={}) {
-      const res = await fetch(path, { ...options, headers: { ...authHeaders, ...(options.headers||{}) } });
-      if (res.status === 401) { localStorage.clear(); window.location.href='/'; }
-      return { ok: res.ok, data: await res.json() };
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (_) {
+        data = {};
+      }
+
+      return { ok: response.ok, data, status: response.status };
     }
 
-    async function loadProfile(){
-      const {data} = await api('/api/auth/me');
-      document.getElementById('profile').textContent = `Logged in as ${data.username}`;
+    async function loadProfile() {
+      const { data } = await api('/api/auth/me');
+      elements.profile.textContent = `Logged in as ${data.username || ''}`;
     }
 
-    async function loadWords(){
-      const {data} = await api('/api/words');
-      const root = document.getElementById('groupedWords'); root.innerHTML='';
+    async function loadWords() {
+      const { data } = await api('/api/words');
+      elements.groupedWords.innerHTML = '';
       Object.entries(data).forEach(([group, words]) => {
-        const details = document.createElement('details'); details.open = true;
+        const details = document.createElement('details');
+        details.open = true;
         details.innerHTML = `<summary>Group ${group} (${words.length})</summary>`;
-        words.forEach(w => {
-          const row = document.createElement('div'); row.className='word-item';
-          row.innerHTML = `<div><strong>${w.word}</strong> - <span class='muted'>${w.meaning}</span></div>`;
-          const del = document.createElement('button'); del.textContent='Delete'; del.onclick=()=>deleteWord(w.id);
-          row.appendChild(del); details.appendChild(row);
+
+        words.forEach((wordItem) => {
+          const row = document.createElement('div');
+          row.className = 'word-item';
+          row.innerHTML = `<div><strong>${wordItem.word}</strong> - <span class='muted'>${wordItem.meaning}</span></div>`;
+
+          const del = document.createElement('button');
+          del.textContent = 'Delete';
+          del.onclick = () => deleteWord(wordItem.id);
+          row.appendChild(del);
+          details.appendChild(row);
         });
-        root.appendChild(details);
+
+        elements.groupedWords.appendChild(details);
       });
     }
 
-    async function loadStats(){
-      const {data} = await api('/api/stats');
-      document.getElementById('stats').innerHTML = `
+    async function loadStats() {
+      const { data } = await api('/api/stats');
+      elements.stats.innerHTML = `
         <div class='stat'><div class='muted'>Total Words</div><strong>${data.total_words}</strong></div>
         <div class='stat'><div class='muted'>Strong Words</div><strong>${data.strong_words}</strong></div>
         <div class='stat'><div class='muted'>Weak Words</div><strong>${data.weak_words}</strong></div>
@@ -128,24 +174,31 @@
 
     function startCountdown(seconds) {
       if (countdownTimer) clearInterval(countdownTimer);
-      let remaining = Number.isFinite(seconds) ? seconds : parseInt(seconds, 10);
-      if (!Number.isFinite(remaining) || remaining < 0) {
-        document.getElementById('countdown').textContent = '-';
+      const initial = Number.parseInt(seconds, 10);
+
+      if (!Number.isFinite(initial) || initial < 0) {
+        elements.countdown.textContent = '-';
         return;
       }
-      document.getElementById('countdown').textContent = remaining;
+
+      let remaining = initial;
+      elements.countdown.textContent = String(remaining);
       countdownTimer = setInterval(() => {
         remaining = Math.max(0, remaining - 1);
-        document.getElementById('countdown').textContent = remaining;
+        elements.countdown.textContent = String(remaining);
+        if (remaining === 0 && countdownTimer) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
       }, 1000);
     }
 
     function renderWord(word, countdown = '-') {
       currentWordId = word.id;
-      liveWord.textContent = word.word;
-      liveMeaning.textContent = word.meaning;
-      liveGroup.textContent = word.group_name;
-      liveStrength.textContent = word.strength_score;
+      elements.liveWord.textContent = word.word;
+      elements.liveMeaning.textContent = word.meaning;
+      elements.liveGroup.textContent = word.group_name;
+      elements.liveStrength.textContent = word.strength_score;
       startCountdown(countdown);
     }
 
@@ -156,74 +209,113 @@
       }
     }
 
-    function connectWS(){
+    function connectWS() {
       const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${wsProtocol}://${location.host}/ws/learning?token=${token}`);
+
       ws.onmessage = (event) => {
         const payload = JSON.parse(event.data);
-        if (payload.type === 'next_word') {
-          renderWord(payload.word, payload.countdown_seconds);
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('New Word', { body: payload.word.word + ' - ' + payload.word.meaning });
-          }
+        if (payload.type !== 'next_word') return;
+
+        renderWord(payload.word, payload.countdown_seconds);
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('New Word', { body: `${payload.word.word} - ${payload.word.meaning}` });
         }
       };
+
       ws.onopen = () => {
         if (pingTimer) clearInterval(pingTimer);
         pingTimer = setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
         }, 8000);
       };
+
       ws.onclose = () => {
-        if (pingTimer) clearInterval(pingTimer);
+        if (pingTimer) {
+          clearInterval(pingTimer);
+          pingTimer = null;
+        }
         setTimeout(connectWS, 3000);
       };
     }
 
-    async function addWord(){
-      await api('/api/words', { method:'POST', body:JSON.stringify({ word:wordInput.value, meaning:meaningInput.value, group_name:groupInput.value })});
-      wordInput.value=''; meaningInput.value='';
+    async function addWord() {
+      await api('/api/words', {
+        method: 'POST',
+        body: JSON.stringify({
+          word: elements.wordInput.value,
+          meaning: elements.meaningInput.value,
+          group_name: elements.groupInput.value
+        })
+      });
+      elements.wordInput.value = '';
+      elements.meaningInput.value = '';
       await Promise.all([loadWords(), loadStats()]);
     }
-    async function deleteWord(id){ await api(`/api/words/${id}`, {method:'DELETE'}); await Promise.all([loadWords(), loadStats()]); }
 
-    async function saveMode(){
-      await api('/api/learning/mode', {method:'POST', body:JSON.stringify({ mode:modeSelect.value, selected_group:modeGroup.value })});
+    async function deleteWord(id) {
+      await api(`/api/words/${id}`, { method: 'DELETE' });
+      await Promise.all([loadWords(), loadStats()]);
     }
 
-    async function fetchNextWord(){
-      const params = new URLSearchParams({mode:modeSelect.value, selected_group:modeGroup.value});
-      const {ok, data} = await api('/api/learning/next?' + params.toString());
+    async function saveMode() {
+      await api('/api/learning/mode', {
+        method: 'POST',
+        body: JSON.stringify({ mode: elements.modeSelect.value, selected_group: elements.modeGroup.value })
+      });
+    }
+
+    async function fetchNextWord() {
+      const params = new URLSearchParams({
+        mode: elements.modeSelect.value,
+        selected_group: elements.modeGroup.value
+      });
+      const { ok, data } = await api('/api/learning/next?' + params.toString());
       if (ok) renderWord(data);
     }
 
-    async function startLearning(){
-      const payload = { mode: modeSelect.value, selected_group: modeGroup.value };
-      await api('/start-learning', { method:'POST', body: JSON.stringify(payload) });
+    async function startLearning() {
+      await api('/start-learning', {
+        method: 'POST',
+        body: JSON.stringify({ mode: elements.modeSelect.value, selected_group: elements.modeGroup.value })
+      });
     }
 
-    async function stopLearning(){
-      await api('/stop-learning', { method:'POST' });
+    async function stopLearning() {
+      await api('/stop-learning', { method: 'POST' });
     }
 
-    async function review(was_correct){
+    async function review(wasCorrect) {
       if (!currentWordId) return;
-      await api('/api/learning/review', {method:'POST', body:JSON.stringify({ word_id: currentWordId, was_correct })});
+      await api('/api/learning/review', {
+        method: 'POST',
+        body: JSON.stringify({ word_id: currentWordId, was_correct: wasCorrect })
+      });
       await loadStats();
       await fetchNextWord();
     }
 
-    addWordBtn.onclick = addWord;
-    saveModeBtn.onclick = saveMode;
-    nextWordBtn.onclick = fetchNextWord;
-    startLearningBtn.onclick = startLearning;
-    stopLearningBtn.onclick = stopLearning;
-    correctBtn.onclick = () => review(true);
-    wrongBtn.onclick = () => review(false);
-    logoutBtn.onclick = async () => { await api('/api/auth/logout', {method:'POST'}); localStorage.clear(); window.location.href='/'; };
+    elements.addWordBtn.onclick = addWord;
+    elements.saveModeBtn.onclick = saveMode;
+    elements.nextWordBtn.onclick = fetchNextWord;
+    elements.startLearningBtn.onclick = startLearning;
+    elements.stopLearningBtn.onclick = stopLearning;
+    elements.correctBtn.onclick = () => review(true);
+    elements.wrongBtn.onclick = () => review(false);
+    elements.logoutBtn.onclick = async () => {
+      await api('/api/auth/logout', { method: 'POST' });
+      localStorage.clear();
+      window.location.href = '/';
+    };
 
     ensureNotificationPermission();
-    loadProfile(); loadWords(); loadStats(); connectWS();
+    loadProfile();
+    loadWords();
+    loadStats();
+    connectWS();
   </script>
 </body>
 </html>
