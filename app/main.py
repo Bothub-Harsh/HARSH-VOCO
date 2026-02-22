@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app.auth import get_current_user
 from app.database import Base, engine
 from app.routes.auth_routes import router as auth_router
-from app.routes.learning_routes import router as learning_router
+from app.routes.learning_routes import public_router as learning_public_router, router as learning_router
 from app.routes.stats_routes import router as stats_router
 from app.routes.word_routes import router as word_router
 from app.scheduler import LearningScheduler
@@ -68,6 +68,7 @@ def on_shutdown() -> None:
 app.include_router(auth_router)
 app.include_router(word_router)
 app.include_router(learning_router)
+app.include_router(learning_public_router)
 app.include_router(stats_router)
 
 

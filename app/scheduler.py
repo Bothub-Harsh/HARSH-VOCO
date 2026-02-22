@@ -16,8 +16,11 @@ class LearningScheduler:
     def __init__(self, websocket_manager) -> None:
         self.websocket_manager = websocket_manager
         self.scheduler = BackgroundScheduler()
+        self.active_users: set[int] = set()
 
     def start(self) -> None:
+        if self.scheduler.running:
+            return
         self.scheduler.add_job(self._run_dispatch_cycle, "interval", minutes=1, id="learning_dispatch", replace_existing=True)
         self.scheduler.start()
 
@@ -28,10 +31,20 @@ class LearningScheduler:
     def update_user_preference(self, user_id: int, mode: str, selected_group: str | None) -> None:
         user_learning_preferences[user_id] = {"mode": mode, "selected_group": selected_group}
 
+    def start_learning(self, user_id: int, mode: str, selected_group: str | None) -> None:
+        self.start()
+        self.update_user_preference(user_id, mode, selected_group)
+        self.active_users.add(user_id)
+
+    def stop_learning(self, user_id: int) -> None:
+        self.active_users.discard(user_id)
+
     def _run_dispatch_cycle(self) -> None:
         with SessionLocal() as db:
             users = db.query(User).all()
             for user in users:
+                if user.id not in self.active_users:
+                    continue
                 preference = user_learning_preferences.get(user.id, {"mode": MODE_SMART_SPACED, "selected_group": None})
                 next_word = get_next_word(
                     db=db,
